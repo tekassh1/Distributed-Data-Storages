@@ -1,5 +1,7 @@
-DROP FUNCTION IF EXISTS get_files_recursive(directory TEXT);
-CREATE FUNCTION get_files_recursive(directory TEXT)
+-- SET search_path TO pg_temp;
+
+DROP FUNCTION IF EXISTS pg_temp.get_files_recursive(directory TEXT);
+CREATE FUNCTION pg_temp.get_files_recursive(directory TEXT)
 RETURNS TABLE(file_name TEXT)
 AS $$
     DECLARE
@@ -26,42 +28,38 @@ AS $$
     END;
 $$ LANGUAGE plpgsql;
 
-DROP PROCEDURE IF EXISTS get_files_meta();
-CREATE PROCEDURE get_files_meta()
+CREATE OR REPLACE PROCEDURE pg_temp.show_files_meta()
 AS $$
-    DECLARE
-        file_path TEXT;
-        data_dir TEXT;
-        file_counter INT := 1;
-        file_name TEXT;
-        file_meta RECORD;
-    BEGIN
-        RAISE NOTICE E'\r% % % %', RPAD('No.', 4), RPAD('FILE#', 25), RPAD('MODIFICATION', 24), RPAD('SIZE', 20);
-        RAISE NOTICE '---  ------------------------  ----------------------   --------';
+DECLARE
+    rec record;
+BEGIN
+    RAISE NOTICE 'No. | FILE# | CREATION_TIME | STATUS | SIZE';
+    RAISE NOTICE '----|-------|---------------|--------|------';
 
-        EXECUTE 'SHOW data_directory' INTO data_dir;
-
-        FOR file_path IN SELECT * FROM get_files_recursive(data_dir)
-        LOOP
-            file_name := split_part(file_path, '/', array_length(string_to_array(file_path, '/'), 1));
-            file_meta := pg_stat_file(file_path);
-            RAISE NOTICE E'\r% % % %',
-                RPAD(file_counter::TEXT, 4),
-                RPAD(file_name, 25),
-                RPAD(file_meta.modification::TEXT, 24),
-                RPAD(file_meta.size::TEXT, 20);
-
-            file_counter := file_counter + 1;
-        END LOOP;
-
-        EXCEPTION
-            WHEN OTHERS THEN
-                RETURN;
-
-    END
+    FOR rec IN
+        SELECT
+            ROW_NUMBER() OVER (ORDER BY c.oid) AS "No.",
+            pg_relation_filepath(c.oid) AS "FILE#",
+            NULL AS "CREATION_TIME",
+            CASE
+                WHEN c.relpersistence = 'p' THEN 'PERMANENT'
+                WHEN c.relpersistence = 't' THEN 'TEMPORARY'
+                WHEN c.relpersistence = 'u' THEN 'UNLOGGED'
+                ELSE 'ONLINE'
+            END AS "STATUS",
+            pg_size_pretty(pg_relation_size(c.oid)) AS "SIZE"
+        FROM pg_class c
+        WHERE c.relkind IN ('r', 't', 'm') AND c.relfilenode <> 0
+        ORDER BY pg_relation_filepath(c.oid)
+    LOOP
+        RAISE NOTICE '% | % | % | % | %',
+            rec."No.", rec."FILE#", rec."CREATION_TIME", rec."STATUS", rec."SIZE";
+    END LOOP;
+END
 $$ LANGUAGE plpgsql;
 
-CALL get_files_meta();
+CALL pg_temp.show_files_meta();
+
 
 -- SELECT * FROM get_files_recursive('/var/lib/postgresql/16/main');
 -- SELECT * FROM pg_stat_file('/var/lib/postgresql/16/main/base/4/1259_vm');

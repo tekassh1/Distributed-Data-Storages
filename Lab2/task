@@ -1,0 +1,138 @@
+# 63956
+# ssh -J s387011@helios.cs.ifmo.ru:2222 postgres1@pg118:~/wfe99/... .
+# psql -p 9956 -d postgres
+
+mkdir $HOME/wfe99
+
+export PGDATA="$HOME/wfe99"
+export LANG="ru_RU.KOI8-R"
+export LC_COLLATE="ru_RU.KOI8-R"
+export LC_CTYPE="ru_RU.KOI8-R"
+export LC_ALL="ru_RU.KOI8-R"
+
+initdb
+
+# https://www.postgresql.org/docs/current/runtime-config-resource.html#RUNTIME-CONFIG-RESOURCE-MEMORY
+
+listen_addresses = '*'
+port = 9956
+max_connections = 9
+
+# 4 GB RAM available
+effective_cache_size = 4GB
+
+shared_buffers = 1600MB # OLAP - 40% from all available mem
+temp_buffers = 64MB		# OLAP - x2 OLTP (max 9 * 64 = 576MB)
+work_mem = 16MB			# OLAP - x4 default size (9 sessions 10 cached operations per session), (max 1440MB)
+
+checkpoint_timeout = 15min # OLAP x3 from default (make more cache friendly)
+fsync = on	                    
+
+commit_delay = 20000    # OLAP (sync every 20ms)
+
+# https://www.postgresql.org/docs/current/runtime-config-logging.html
+
+log_destination = 'stderr,csvlog' # https://www.postgresql.org/message-id/1500507716167-5972017.post%40n3.nabble.com
+logging_collector = on
+log_directory = 'pg_log'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+log_file_mode = 0740 
+log_rotation_age = 1d
+log_min_message = warning
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+
+# pg_hba.conf
+
+local   all             all                                     peer  # "local" is for Unix domain socket connections only
+host    all             all             0.0.0.0/0               password # IPv4 local connections:
+host    all             all             ::0/0                   password # IPv6 local connections:
+
+# $PGDATA/pg_wal is default dir to WAL
+
+
+pg_ctl -D $PGDATA start
+pg_ctl -D $PGDATA status
+
+psql -p 9956 -d postgres
+
+
+# Part 3
+
+CREATE TABLESPACE yjr62 LOCATION '/var/db/postgres1/yjr62';
+
+UPDATE pg_database SET datistemplate = false WHERE datname = 'template1';
+
+DROP DATABASE template1;
+
+CREATE DATABASE template1
+WITH 
+    TEMPLATE = template0
+    TABLESPACE = yjr62;
+
+UPDATE pg_database SET datistemplate = true WHERE datname = 'template1';
+
+CREATE DATABASE darkpinkuser WITH TEMPLATE template1; 
+
+\c darkpinkuser
+
+CREATE ROLE test_role WITH LOGIN PASSWORD 'test';
+REVOKE ALL PRIVILEGES ON DATABASE darkpinkuser FROM test_role;
+GRANT CONNECT ON DATABASE darkpinkuser TO test_role;
+CREATE SCHEMA yjr62;
+ALTER ROLE test_role SET search_path TO yjr62;
+GRANT CREATE ON TABLESPACE yjr62 TO test_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA yjr62 TO test_role;
+
+psql -h localhost -p 9956 -U test_role -d darkpinkuser 
+
+CREATE TABLE test_table (
+    id SERIAL PRIMARY KEY,
+    data TEXT
+) TABLESPACE yjr62;
+
+INSERT INTO test_table (data) VALUES ('Test data 1'), ('Test data 2');
+
+CREATE TEMP TABLE test_temp_table1 (
+                             id SERIAL PRIMARY KEY,
+                             data TEXT
+) TABLESPACE cje38;
+
+INSERT INTO test_temp_table1 (data) VALUES ('Test data 1'), ('Test data 2');
+REVOKE ALL ON SCHEMA public FROM имя_пользователя;
+# Расположение таблиц по схемам:
+```
+SELECT
+    n.nspname AS schema_name,
+    c.relname AS table_name
+FROM
+    pg_class c
+JOIN
+    pg_namespace n ON c.relnamespace = n.oid
+WHERE
+    c.relkind = 'r'
+    AND n.nspname != 'pg_catalog'
+    AND n.nspname != 'information_schema'
+ORDER BY
+    schema_name, table_name;
+```
+# Все табличные пространства
+SELECT spcname AS tablespace_name, pg_tablespace_location(oid) AS location
+FROM pg_tablespace;
+
+WITH space AS (
+SELECT
+    COALESCE(t.spcname, 'pg_default') AS spcname,
+    c.relname,
+    ROW_NUMBER() OVER (PARTITION BY COALESCE(t.spcname, 'pg_default') ORDER BY c.relname) AS rn
+  FROM pg_tablespace t
+    FULL JOIN pg_class c ON c.reltablespace = t.oid
+  ORDER BY spcname, c.relname
+)
+SELECT
+  CASE WHEN rn = 1 THEN spcname ELSE NULL END AS spcname,
+  relname
+FROM space;
+
+# psql -h pg118 -p 9956 -U test_role -d darkpinkuser
