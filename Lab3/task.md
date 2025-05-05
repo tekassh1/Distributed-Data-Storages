@@ -274,3 +274,50 @@ postgres=# SELECT * FROM table_three;
         5 | Leo Green     |   300 | completed  | 2025-05-01 20:07:12.392736
 (5 строк)
 ```
+
+# Этап 4
+
+Добавим в `table_one` новые строки
+
+```
+INSERT INTO table_one (username, age, signup_date, is_active) VALUES
+('new_user1', 25, CURRENT_DATE - INTERVAL '1 day', true),
+('new_user2', 32, CURRENT_DATE - INTERVAL '5 days', false),
+('new_user3', 29, CURRENT_DATE - INTERVAL '3 days', true);
+```
+
+Фиксируем время
+
+```
+> date
+воскресенье,  4 мая 2025 г. 23:31:11 (MSK)
+```
+
+Удалим каждую вторую запись
+
+`DELETE FROM table_one WHERE id % 2 = 0;`
+
+Видим, что записи были удалены и есть пропуски в id
+
+```
+postgres=# SELECT * FROM table_one;
+ id | username  | age | signup_date | is_active 
+----+-----------+-----+-------------+-----------
+  1 | alice     |  25 | 2025-05-03  | t
+  3 | carol     |  29 | 2025-05-01  | t
+  5 | eve       |  22 | 2025-05-04  | f
+  7 | new_user2 |  32 | 2025-04-29  | f
+(4 строки)
+```
+
+Создадим дамп таблицы не резервном узле
+
+`pg_dump -U postgres1 -d postgres -p 9956 -F c -f backup.dump`
+
+Скопируем дамп на основной узел
+
+`scp backup.dump postgres1@pg118:~/`
+
+Восстановим данные из дампа
+
+`pg_restore -U postgres1 -d postgres -p 9956 -c -e backup.dump`

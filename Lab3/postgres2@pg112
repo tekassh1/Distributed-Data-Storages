@@ -1,0 +1,17 @@
+#!/bin/bash
+
+BACKUP_USER="postgres1"
+REMOTE_HOST="pg112"
+REMOTE_DIR="/dumps"
+DB_NAME="postgres"
+DUMP_NAME="dump_$(date +%Y-%m-%d_%H-%M-%S).sql"
+
+pg_dump -U $BACKUP_USER -h localhost -d $DB_NAME | ssh $BACKUP_USER@$REMOTE_HOST "cat > $REMOTE_DIR/$DUMP_NAME"
+
+if [ $? -eq 0 ]; then
+    echo "Dump succesfully created and stored to $REMOTE_HOST:$REMOTE_DIR/$DUMP_NAME"
+    rm $DUMP_NAME
+else
+    echo "Error while creating dump." >&2
+    exit 1
+fi
